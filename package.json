@@ -1,0 +1,17 @@
+{
+  "name": "rylac-ai-auth",
+  "version": "1.0.0",
+  "description": "Authorization Panel for Vynaa AI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "body-parser": "^1.20.2"
+  },
+  "engines": {
+    "node": ">=14.x"
+  }
+}
