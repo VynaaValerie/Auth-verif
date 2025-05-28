@@ -1,424 +1,256 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // Connect to Socket.io
-    const socket = io();
-    
-    // UI Elements
-    const botNameEl = document.getElementById('bot-name');
-    const botOwnerEl = document.getElementById('bot-owner');
-    const requestTimeEl = document.getElementById('request-time');
-    const requestIpEl = document.getElementById('request-ip');
-    const requestStatusEl = document.getElementById('request-status');
-    const btnApprove = document.getElementById('btn-approve');
-    const btnReject = document.getElementById('btn-reject');
-    const btnDelete = document.getElementById('btn-delete');
-    const btnMessage = document.getElementById('btn-message');
-    const pendingList = document.getElementById('pending-list');
-    const approvedList = document.getElementById('approved-list');
-    const rejectedList = document.getElementById('rejected-list');
-    const messageModal = document.getElementById('message-modal');
-    const closeModal = document.querySelector('.close-modal');
-    const sendMessageBtn = document.getElementById('send-message');
-    const messagesContainer = document.getElementById('messages-container');
-    const tabs = document.querySelectorAll('.tab');
-    const tabContents = document.querySelectorAll('.tab-content');
-    
-    let currentRequest = null;
-    let allRequests = [];
-    
-    // Tab switching
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            const tabName = tab.dataset.tab;
-            
-            // Update active tab
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            
-            // Show corresponding content
-            tabContents.forEach(content => {
-                content.classList.remove('active');
-                if (content.id === `${tabName}-list`) {
-                    content.classList.add('active');
-                }
-            });
-        });
-    });
-    
-    // Load initial data
-    function loadInitialData(data) {
-        allRequests = [
-            ...data.requests,
-            ...data.approved,
-            ...data.rejected
-        ];
-        
-        // Get current request from URL
-        const params = new URLSearchParams(window.location.search);
-        const requestId = params.get('id');
-        
-        if (requestId) {
-            currentRequest = allRequests.find(r => r.id === requestId);
-            if (currentRequest) {
-                displayRequestDetails(currentRequest);
-                loadMessages(requestId);
-            }
-        }
-        
-        updateRequestsLists(data);
+document.addEventListener('DOMContentLoaded', () => {
+  const socket = io();
+  const authKey = 'default-secret-key'; // Should match server
+  
+  // DOM elements
+  const elements = {
+    pendingList: document.getElementById('pending-list'),
+    approvedList: document.getElementById('approved-list'),
+    rejectedList: document.getElementById('rejected-list'),
+    activeBotsList: document.getElementById('active-bots-list'),
+    botName: document.getElementById('bot-name'),
+    botOwner: document.getElementById('bot-owner'),
+    botIp: document.getElementById('bot-ip'),
+    requestTime: document.getElementById('request-time'),
+    requestStatus: document.getElementById('request-status'),
+    btnApprove: document.getElementById('btn-approve'),
+    btnReject: document.getElementById('btn-reject'),
+    btnDelete: document.getElementById('btn-delete'),
+    btnMessage: document.getElementById('btn-message'),
+    messageModal: document.getElementById('message-modal'),
+    messageInput: document.getElementById('message-input'),
+    sendMessageBtn: document.getElementById('send-message'),
+    toast: document.getElementById('toast')
+  };
+
+  let currentRequest = null;
+  let activeBots = [];
+
+  // Initialize UI
+  function initUI(data) {
+    updateRequests(data.requests, 'pending');
+    updateRequests(data.approved, 'approved');
+    updateRequests(data.rejected, 'rejected');
+    updateActiveBots(data.activeBots);
+  }
+
+  // Update requests list
+  function updateRequests(requests, type) {
+    const list = elements[`${type}List`];
+    list.innerHTML = '';
+
+    if (requests.length === 0) {
+      list.innerHTML = `<div class="empty">No ${type} requests</div>`;
+      return;
     }
-    
-    // Display request details
-    function displayRequestDetails(request) {
-        botNameEl.textContent = request.botName || '-';
-        botOwnerEl.textContent = request.owner || '-';
-        requestTimeEl.textContent = request.time ? new Date(request.time).toLocaleString() : '-';
-        requestIpEl.textContent = request.ip || '-';
-        updateStatusUI(request.status);
-        
-        // Enable/disable buttons based on status
-        btnApprove.disabled = request.status !== 'pending';
-        btnReject.disabled = request.status !== 'pending';
+
+    requests.forEach(request => {
+      const item = document.createElement('div');
+      item.className = `request-item ${type}`;
+      item.dataset.id = request.id;
+      
+      const time = new Date(request.createdAt).toLocaleString();
+      const lastActive = request.lastActive ? 
+        `Last active: ${new Date(request.lastActive).toLocaleTimeString()}` : '';
+      
+      item.innerHTML = `
+        <div class="request-info">
+          <h3>${request.botName || 'Unknown'}</h3>
+          <p>Owner: ${request.owner || 'Unknown'}</p>
+          <p>IP: ${request.ip || 'Unknown'}</p>
+          <small>${time} • ${lastActive}</small>
+        </div>
+        <div class="request-actions">
+          <span class="status-badge ${type}">${type.toUpperCase()}</span>
+        </div>
+      `;
+
+      item.addEventListener('click', () => showRequestDetails(request));
+      list.appendChild(item);
+    });
+  }
+
+  // Update active bots list
+  function updateActiveBots(bots) {
+    activeBots = bots;
+    const list = elements.activeBotsList;
+    list.innerHTML = '';
+
+    if (bots.length === 0) {
+      list.innerHTML = '<div class="empty">No active bots</div>';
+      return;
     }
+
+    bots.forEach(bot => {
+      const item = document.createElement('div');
+      item.className = 'bot-item';
+      item.dataset.id = bot.id;
+      
+      const lastActive = new Date(bot.lastActive).toLocaleTimeString();
+      const uptime = Math.floor((new Date() - new Date(bot.lastActive)) / 60000);
+      
+      item.innerHTML = `
+        <div class="bot-info">
+          <h3>${bot.botName || 'Unknown'}</h3>
+          <p>IP: ${bot.ip || 'Unknown'}</p>
+          <small>Active now • Uptime: ${uptime} mins</small>
+        </div>
+        <div class="bot-status online"></div>
+      `;
+
+      list.appendChild(item);
+    });
+  }
+
+  // Show request details
+  function showRequestDetails(request) {
+    currentRequest = request;
     
-    // Update status UI
-    function updateStatusUI(status) {
-        requestStatusEl.className = 'request-status';
-        
-        switch(status) {
-            case 'approved':
-                requestStatusEl.classList.add('status-approved');
-                requestStatusEl.textContent = 'APPROVED';
-                break;
-            case 'rejected':
-                requestStatusEl.classList.add('status-rejected');
-                requestStatusEl.textContent = 'REJECTED';
-                break;
-            default:
-                requestStatusEl.classList.add('status-pending');
-                requestStatusEl.textContent = 'PENDING';
-        }
+    elements.botName.textContent = request.botName || '-';
+    elements.botOwner.textContent = request.owner || '-';
+    elements.botIp.textContent = request.ip || '-';
+    elements.requestTime.textContent = request.createdAt ? 
+      new Date(request.createdAt).toLocaleString() : '-';
+    
+    updateStatusUI(request.status);
+    
+    // Enable/disable buttons based on status
+    elements.btnApprove.disabled = request.status !== 'pending';
+    elements.btnReject.disabled = request.status !== 'pending';
+  }
+
+  // Update status UI
+  function updateStatusUI(status) {
+    elements.requestStatus.className = 'status-badge';
+    elements.requestStatus.classList.add(status);
+    elements.requestStatus.textContent = status.toUpperCase();
+  }
+
+  // Show toast notification
+  function showToast(message, type = 'info') {
+    elements.toast.textContent = message;
+    elements.toast.className = `toast ${type} show`;
+    
+    setTimeout(() => {
+      elements.toast.classList.remove('show');
+    }, 3000);
+  }
+
+  // Socket.io events
+  socket.on('init', initUI);
+  
+  socket.on('new-request', (request) => {
+    showToast(`New request from ${request.botName || 'unknown bot'}`, 'info');
+    updateRequests([request], 'pending');
+  });
+  
+  socket.on('request-approved', (request) => {
+    showToast(`Approved: ${request.botName}`, 'success');
+    updateRequests([request], 'approved');
+    if (currentRequest?.id === request.id) showRequestDetails(request);
+  });
+  
+  socket.on('request-rejected', (request) => {
+    showToast(`Rejected: ${request.botName}`, 'error');
+    updateRequests([request], 'rejected');
+    if (currentRequest?.id === request.id) showRequestDetails(request);
+  });
+  
+  socket.on('active-bots', (bots) => {
+    updateActiveBots(bots);
+  });
+
+  // Button event listeners
+  elements.btnApprove.addEventListener('click', () => {
+    if (!currentRequest) return;
+    
+    fetch('/api/approve', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-key': authKey
+      },
+      body: JSON.stringify({ requestId: currentRequest.id })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (!data.success) throw new Error('Failed to approve');
+    })
+    .catch(err => {
+      showToast(err.message, 'error');
+    });
+  });
+
+  elements.btnReject.addEventListener('click', () => {
+    if (!currentRequest) return;
+    
+    fetch('/api/reject', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-key': authKey
+      },
+      body: JSON.stringify({ requestId: currentRequest.id })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (!data.success) throw new Error('Failed to reject');
+    })
+    .catch(err => {
+      showToast(err.message, 'error');
+    });
+  });
+
+  elements.btnDelete.addEventListener('click', () => {
+    if (!currentRequest) return;
+    
+    if (confirm('Delete this request permanently?')) {
+      showToast('Request deleted', 'info');
+      window.location.href = '/admin';
     }
+  });
+
+  // Message modal
+  elements.btnMessage.addEventListener('click', () => {
+    if (!currentRequest) return;
+    elements.messageModal.classList.add('show');
+    elements.messageInput.focus();
+  });
+
+  elements.sendMessageBtn.addEventListener('click', sendMessage);
+
+  function sendMessage() {
+    const message = elements.messageInput.value.trim();
+    if (!message || !currentRequest) return;
     
-    // Update all requests lists
-    function updateRequestsLists(data) {
-        updateRequestList(pendingList, data.requests);
-        updateRequestList(approvedList, data.approved);
-        updateRequestList(rejectedList, data.rejected);
+    // In a real app, you would send this to the bot
+    showToast(`Message sent to ${currentRequest.botName}`, 'success');
+    elements.messageInput.value = '';
+    elements.messageModal.classList.remove('show');
+  }
+
+  // Close modal when clicking outside
+  elements.messageModal.addEventListener('click', (e) => {
+    if (e.target === elements.messageModal) {
+      elements.messageModal.classList.remove('show');
     }
-    
-    // Update a single request list
-    function updateRequestList(listElement, requests) {
-        listElement.innerHTML = '';
-        
-        if (requests.length === 0) {
-            listElement.innerHTML = '<div class="empty-message">No requests found</div>';
-            return;
-        }
-        
-        requests.forEach(request => {
-            const requestItem = document.createElement('div');
-            requestItem.className = 'request-item';
-            requestItem.dataset.id = request.id;
-            
-            let statusClass = '';
-            let statusText = '';
-            
-            switch(request.status) {
-                case 'approved':
-                    statusClass = 'status-approved';
-                    statusText = 'APPROVED';
-                    break;
-                case 'rejected':
-                    statusClass = 'status-rejected';
-                    statusText = 'REJECTED';
-                    break;
-                default:
-                    statusClass = 'status-pending';
-                    statusText = 'PENDING';
-            }
-            
-            requestItem.innerHTML = `
-                <div class="request-info">
-                    <strong>${request.botName || 'Unknown'}</strong>
-                    <div class="request-meta">
-                        <span>Owner: ${request.owner || 'Unknown'}</span>
-                        <span>IP: ${request.ip || 'Unknown'}</span>
-                    </div>
-                    <small>${request.time ? new Date(request.time).toLocaleString() : 'Unknown'}</small>
-                </div>
-                <span class="request-status ${statusClass}">${statusText}</span>
-            `;
-            
-            // Add click event to view details
-            requestItem.addEventListener('click', () => {
-                window.location.href = `?id=${request.id}`;
-            });
-            
-            listElement.appendChild(requestItem);
-        });
+  });
+
+  // Close modal with Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      elements.messageModal.classList.remove('show');
     }
-    
-    // Load messages for current request
-    function loadMessages(requestId) {
-        fetch(`/api/get-requests`)
-            .then(res => res.json())
-            .then(data => {
-                const messages = data.messages.filter(m => m.requestId === requestId);
-                displayMessages(messages);
-            })
-            .catch(error => {
-                console.error('Error loading messages:', error);
-                messagesContainer.innerHTML = '<div class="empty-message">Error loading messages</div>';
-            });
-    }
-    
-    // Display messages
-    function displayMessages(messages) {
-        messagesContainer.innerHTML = '';
-        
-        if (messages.length === 0) {
-            messagesContainer.innerHTML = '<div class="empty-message">No messages yet</div>';
-            return;
-        }
-        
-        // Sort messages by time
-        messages.sort((a, b) => new Date(a.time) - new Date(b.time));
-        
-        messages.forEach(message => {
-            const messageEl = document.createElement('div');
-            messageEl.className = `message ${message.admin ? 'admin-message' : 'bot-message'}`;
-            
-            messageEl.innerHTML = `
-                <div class="message-content">${message.message || ''}</div>
-                <div class="message-time">${message.time ? new Date(message.time).toLocaleTimeString() : ''}</div>
-            `;
-            
-            messagesContainer.appendChild(messageEl);
-        });
-        
-        // Scroll to bottom
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
-    
-    // Socket.io event listeners
-    socket.on('initial-data', loadInitialData);
-    socket.on('new-request', (request) => {
-        allRequests.push(request);
-        if (currentRequest && currentRequest.id === request.id) {
-            displayRequestDetails(request);
-        }
-        showNotification(`New request from ${request.botName || 'a bot'}`);
-        
-        // Highlight new request
-        const requestItem = document.querySelector(`.request-item[data-id="${request.id}"]`);
-        if (requestItem) {
-            requestItem.classList.add('new-request');
-            setTimeout(() => {
-                requestItem.classList.remove('new-request');
-            }, 5000);
-        }
-    });
-    
-    socket.on('request-approved', (request) => {
-        allRequests = allRequests.map(r => r.id === request.id ? request : r);
-        if (currentRequest && currentRequest.id === request.id) {
-            displayRequestDetails(request);
-        }
-    });
-    
-    socket.on('request-rejected', (request) => {
-        allRequests = allRequests.map(r => r.id === request.id ? request : r);
-        if (currentRequest && currentRequest.id === request.id) {
-            displayRequestDetails(request);
-        }
-    });
-    
-    socket.on('request-updated', updateRequestsLists);
-    
-    socket.on('new-message', ({ requestId, message }) => {
-        if (currentRequest && currentRequest.id === requestId) {
-            const messageEl = document.createElement('div');
-            messageEl.className = `message ${message.admin ? 'admin-message' : 'bot-message'}`;
-            
-            messageEl.innerHTML = `
-                <div class="message-content">${message.message || ''}</div>
-                <div class="message-time">${message.time ? new Date(message.time).toLocaleTimeString() : ''}</div>
-            `;
-            
-            messagesContainer.appendChild(messageEl);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
-    });
-    
-    // Show notification
-    function showNotification(message) {
-        if (!('Notification' in window)) return;
-        
-        if (Notification.permission === 'granted') {
-            new Notification('New Bot Request', { 
-                body: message,
-                icon: '/favicon.ico'
-            });
-        } else if (Notification.permission !== 'denied') {
-            Notification.requestPermission().then(permission => {
-                if (permission === 'granted') {
-                    new Notification('New Bot Request', { 
-                        body: message,
-                        icon: '/favicon.ico'
-                    });
-                }
-            });
-        }
-    }
-    
-    // Event listeners for buttons
-    btnApprove.addEventListener('click', function() {
-        if (currentRequest && confirm('Are you sure you want to approve this request?')) {
-            fetch('/api/approve-request', {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'x-auth-key': 'default-secret-key' // Replace with your actual auth key
-                },
-                body: JSON.stringify({ requestId: currentRequest.id })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    currentRequest.status = 'approved';
-                    displayRequestDetails(currentRequest);
-                } else {
-                    alert('Failed to approve request: ' + (data.message || 'Unknown error'));
-                }
-            })
-            .catch(error => {
-                console.error('Error approving request:', error);
-                alert('Error approving request');
-            });
-        }
-    });
-    
-    btnReject.addEventListener('click', function() {
-        if (currentRequest && confirm('Are you sure you want to reject this request?')) {
-            fetch('/api/reject-request', {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'x-auth-key': 'default-secret-key' // Replace with your actual auth key
-                },
-                body: JSON.stringify({ requestId: currentRequest.id })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    currentRequest.status = 'rejected';
-                    displayRequestDetails(currentRequest);
-                } else {
-                    alert('Failed to reject request: ' + (data.message || 'Unknown error'));
-                }
-            })
-            .catch(error => {
-                console.error('Error rejecting request:', error);
-                alert('Error rejecting request');
-            });
-        }
-    });
-    
-    btnDelete.addEventListener('click', function() {
-        if (currentRequest && confirm('Are you sure you want to delete this request?')) {
-            // In a real app, you would call an API endpoint to delete
-            alert('Request deleted!');
-            window.location.href = window.location.pathname;
-        }
-    });
-    
-    btnMessage.addEventListener('click', function() {
-        if (currentRequest) {
-            messageModal.style.display = 'flex';
-            document.getElementById('message-text').focus();
-        }
-    });
-    
-    closeModal.addEventListener('click', function() {
-        messageModal.style.display = 'none';
-    });
-    
-    sendMessageBtn.addEventListener('click', function() {
-        const messageText = document.getElementById('message-text').value;
-        if (messageText.trim() === '') {
-            alert('Please enter a message!');
-            return;
-        }
-        
-        if (currentRequest) {
-            fetch('/api/send-message', {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'x-auth-key': 'default-secret-key' // Replace with your actual auth key
-                },
-                body: JSON.stringify({
-                    requestId: currentRequest.id,
-                    message: messageText
-                })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    document.getElementById('message-text').value = '';
-                    messageModal.style.display = 'none';
-                    
-                    // Add message to UI immediately
-                    const newMessage = {
-                        id: Date.now().toString(),
-                        requestId: currentRequest.id,
-                        message: messageText,
-                        time: new Date().toISOString(),
-                        admin: true
-                    };
-                    
-                    const messageEl = document.createElement('div');
-                    messageEl.className = 'message admin-message';
-                    messageEl.innerHTML = `
-                        <div class="message-content">${messageText}</div>
-                        <div class="message-time">Just now</div>
-                    `;
-                    
-                    messagesContainer.appendChild(messageEl);
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                } else {
-                    alert('Failed to send message: ' + (data.message || 'Unknown error'));
-                }
-            })
-            .catch(error => {
-                console.error('Error sending message:', error);
-                alert('Error sending message');
-            });
-        }
-    });
-    
-    // Close modal when clicking outside or pressing Escape
-    window.addEventListener('click', function(event) {
-        if (event.target === messageModal) {
-            messageModal.style.display = 'none';
-        }
-    });
-    
-    document.addEventListener('keydown', function(event) {
-        if (event.key === 'Escape' && messageModal.style.display === 'flex') {
-            messageModal.style.display = 'none';
-        }
-    });
-    
-    // Load messages if viewing a request
-    const params = new URLSearchParams(window.location.search);
-    const requestId = params.get('id');
-    if (requestId) {
-        loadMessages(requestId);
-    }
-    
-    // Request notification permission on page load
-    if ('Notification' in window) {
-        Notification.requestPermission();
-    }
+  });
+
+  // Initial load
+  fetch('/api/data', {
+    headers: { 'x-auth-key': authKey }
+  })
+  .then(res => res.json())
+  .then(initUI)
+  .catch(err => {
+    console.error('Failed to load data:', err);
+    showToast('Failed to load data', 'error');
+  });
 });

@@ -1,18 +1,15 @@
 import express from 'express';
-import { fileURLToPath } from 'url';
-import path from 'path';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 import { Low, Memory } from 'lowdb';
 import { v4 as uuidv4 } from 'uuid';
 import cors from 'cors';
-import { Server } from 'socket.io';
-import http from 'http';
-import bodyParser from 'body-parser';
+import dotenv from 'dotenv';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+dotenv.config();
 
 const app = express();
-const server = http.createServer(app);
+const server = createServer(app);
 const io = new Server(server, {
   cors: {
     origin: "*",
@@ -20,7 +17,8 @@ const io = new Server(server, {
   }
 });
 
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
+const AUTH_KEY = process.env.AUTH_KEY || 'default-secret-key';
 
 // Database setup
 const adapter = new Memory();
@@ -33,8 +31,10 @@ async function initializeDB() {
     approved: [],
     rejected: [],
     messages: [],
+    activeBots: [],
     settings: {
-      authKey: process.env.AUTH_KEY || 'default-secret-key'
+      authKey: AUTH_KEY,
+      maxBots: 50
     }
   };
   await db.write();
@@ -44,183 +44,185 @@ await initializeDB();
 
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public'), {
-  extensions: ['html']
-}));
+app.use(express.json());
+app.use(express.static('public'));
 
 // Authentication middleware
 const authenticate = (req, res, next) => {
-  const authKey = req.headers['x-auth-key'];
-  if (authKey && authKey === db.data.settings.authKey) {
-    return next();
-  }
+  const authKey = req.headers['x-auth-key'] || req.query.authKey;
+  if (authKey === db.data.settings.authKey) return next();
   res.status(401).json({ success: false, message: 'Unauthorized' });
 };
 
 // Socket.io connection
 io.on('connection', (socket) => {
-  console.log('New admin client connected:', socket.id);
+  console.log('Admin connected:', socket.id);
   
-  // Send current data to new client
-  socket.emit('initial-data', db.data);
+  // Send initial data
+  socket.emit('init', db.data);
   
   socket.on('disconnect', () => {
-    console.log('Admin client disconnected:', socket.id);
+    console.log('Admin disconnected:', socket.id);
   });
 });
 
 // API Endpoints
-app.post('/api/request-permission', async (req, res) => {
+
+// Bot requests permission
+app.post('/api/request', async (req, res) => {
   const { botName, owner, authKey } = req.body;
+  const ip = req.ip || req.headers['x-forwarded-for'];
   
-  // Verify auth key
   if (authKey !== db.data.settings.authKey) {
     return res.status(401).json({ success: false, message: 'Invalid auth key' });
   }
 
-  const clientIp = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-  
+  // Check if already exists
+  const existing = db.data.requests.find(r => r.ip === ip);
+  if (existing) {
+    return res.json({
+      success: true,
+      requestId: existing.id,
+      message: 'Existing request found'
+    });
+  }
+
   const requestId = uuidv4();
   const newRequest = {
     id: requestId,
     botName,
     owner,
-    time: new Date().toISOString(),
-    ip: clientIp,
+    ip,
     status: 'pending',
-    lastUpdated: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    lastActive: new Date().toISOString()
   };
-  
+
   db.data.requests.push(newRequest);
   await db.write();
-  
-  // Broadcast to all admin clients
+
   io.emit('new-request', newRequest);
-  
-  res.json({
-    success: true,
-    requestId,
-    message: 'Permission request received'
-  });
+  res.json({ success: true, requestId });
 });
 
-app.post('/api/approve-request', authenticate, async (req, res) => {
+// Admin approves request
+app.post('/api/approve', authenticate, async (req, res) => {
   const { requestId } = req.body;
   
   const request = db.data.requests.find(r => r.id === requestId);
-  if (!request) {
-    return res.status(404).json({ success: false, message: 'Request not found' });
-  }
-  
+  if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+
   request.status = 'approved';
-  request.lastUpdated = new Date().toISOString();
+  request.approvedAt = new Date().toISOString();
   
-  // Move to approved list
   db.data.approved.push(request);
   db.data.requests = db.data.requests.filter(r => r.id !== requestId);
-  await db.write();
   
-  // Broadcast update
-  io.emit('request-approved', request);
-  io.emit('request-updated', db.data);
-  
-  res.json({
-    success: true,
-    message: 'Request approved'
+  // Add to active bots
+  db.data.activeBots.push({
+    id: requestId,
+    botName: request.botName,
+    ip: request.ip,
+    lastActive: new Date().toISOString()
   });
+
+  await db.write();
+
+  io.emit('request-approved', request);
+  io.emit('active-bots', db.data.activeBots);
+  res.json({ success: true });
 });
 
-app.post('/api/reject-request', authenticate, async (req, res) => {
+// Admin rejects request
+app.post('/api/reject', authenticate, async (req, res) => {
   const { requestId } = req.body;
   
   const request = db.data.requests.find(r => r.id === requestId);
-  if (!request) {
-    return res.status(404).json({ success: false, message: 'Request not found' });
-  }
-  
+  if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+
   request.status = 'rejected';
-  request.lastUpdated = new Date().toISOString();
+  request.rejectedAt = new Date().toISOString();
   
-  // Move to rejected list
   db.data.rejected.push(request);
   db.data.requests = db.data.requests.filter(r => r.id !== requestId);
   await db.write();
-  
-  // Broadcast update
+
   io.emit('request-rejected', request);
-  io.emit('request-updated', db.data);
-  
-  res.json({
-    success: true,
-    message: 'Request rejected'
-  });
+  res.json({ success: true });
 });
 
-app.post('/api/send-message', authenticate, async (req, res) => {
-  const { requestId, message } = req.body;
-  
-  const request = [...db.data.requests, ...db.data.approved, ...db.data.rejected].find(r => r.id === requestId);
-  if (!request) {
-    return res.status(404).json({ success: false, message: 'Request not found' });
-  }
-  
-  const newMessage = {
-    id: uuidv4(),
-    requestId,
-    message,
-    time: new Date().toISOString(),
-    admin: true
-  };
-  
-  db.data.messages.push(newMessage);
-  await db.write();
-  
-  // Broadcast new message
-  io.emit('new-message', { requestId, message: newMessage });
-  
-  res.json({
-    success: true,
-    message: 'Message sent to bot'
-  });
-});
-
-app.get('/api/verify-permission', async (req, res) => {
+// Bot checks permission
+app.get('/api/check', async (req, res) => {
   const { ip, authKey } = req.query;
   
-  // Verify auth key
   if (authKey !== db.data.settings.authKey) {
-    return res.status(401).json({ valid: false, message: 'Invalid auth key' });
+    return res.json({ valid: false, message: 'Invalid auth key' });
   }
 
-  const isApproved = db.data.approved.some(request => request.ip === ip);
+  const isApproved = db.data.activeBots.some(bot => bot.ip === ip);
   
-  res.json({
-    valid: isApproved,
-    message: isApproved ? 'Permission granted' : 'Permission denied'
-  });
+  if (isApproved) {
+    // Update last active time
+    const bot = db.data.activeBots.find(b => b.ip === ip);
+    if (bot) {
+      bot.lastActive = new Date().toISOString();
+      await db.write();
+      io.emit('active-bots', db.data.activeBots);
+    }
+  }
+
+  res.json({ valid: isApproved });
 });
 
-app.get('/api/get-requests', authenticate, async (req, res) => {
+// Get all data
+app.get('/api/data', authenticate, (req, res) => {
   res.json(db.data);
 });
 
-// Admin panel routes
+// Bot sends heartbeat
+app.post('/api/heartbeat', async (req, res) => {
+  const { ip, authKey } = req.body;
+  
+  if (authKey !== db.data.settings.authKey) {
+    return res.status(401).json({ success: false });
+  }
+
+  const bot = db.data.activeBots.find(b => b.ip === ip);
+  if (bot) {
+    bot.lastActive = new Date().toISOString();
+    await db.write();
+    io.emit('active-bots', db.data.activeBots);
+  }
+
+  res.json({ success: true });
+});
+
+// Cleanup inactive bots
+setInterval(async () => {
+  const now = new Date();
+  const inactiveBots = db.data.activeBots.filter(bot => {
+    const lastActive = new Date(bot.lastActive);
+    return (now - lastActive) > 5 * 60 * 1000; // 5 minutes inactive
+  });
+
+  if (inactiveBots.length > 0) {
+    db.data.activeBots = db.data.activeBots.filter(bot => {
+      return !inactiveBots.some(b => b.id === bot.id);
+    });
+    
+    await db.write();
+    io.emit('active-bots', db.data.activeBots);
+    console.log(`Cleaned up ${inactiveBots.length} inactive bots`);
+  }
+}, 60 * 1000); // Check every minute
+
+// Serve admin panel
 app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+  res.sendFile('admin.html', { root: 'public' });
 });
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Handle 404
-app.use((req, res) => {
-  res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
-});
-
-server.listen(port, () => {
-  console.log(`Authorization server running on port ${port}`);
-  console.log(`Admin panel: http://localhost:${port}/admin`);
+// Start server
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Admin panel: http://localhost:${PORT}/admin`);
 });
