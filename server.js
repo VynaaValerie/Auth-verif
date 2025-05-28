@@ -1,12 +1,16 @@
-const express = require('express');
-const path = require('path');
-const fs = require('fs');
-const bodyParser = require('body-parser');
-const { Low, JSONFile } = require('lowdb');
-const { v4: uuidv4 } = require('uuid');
-const cors = require('cors');
-const { Server } = require('socket.io');
-const http = require('http');
+import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { Low } from 'lowdb';
+import { JSONFile } from 'lowdb/node';
+import { v4 as uuidv4 } from 'uuid';
+import cors from 'cors';
+import { Server } from 'socket.io';
+import http from 'http';
+import bodyParser from 'body-parser';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
@@ -31,7 +35,7 @@ async function initializeDB() {
   await db.write();
 }
 
-initializeDB();
+await initializeDB();
 
 // Middleware
 app.use(cors());
