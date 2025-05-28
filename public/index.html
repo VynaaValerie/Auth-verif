@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vynaa AI - Authorization Panel</title>
+    <style>
+        :root {
+            --primary: #FFD700;
+            --secondary: #4a4a4a;
+            --danger: #e74c3c;
+            --success: #2ecc71;
+            --info: #3498db;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px 0;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        h1 {
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .request-info {
+            margin-bottom: 20px;
+        }
+        
+        .info-item {
+            display: flex;
+            margin-bottom: 10px;
+        }
+        
+        .info-label {
+            font-weight: bold;
+            width: 150px;
+            color: var(--secondary);
+        }
+        
+        .info-value {
+            flex: 1;
+        }
+        
+        .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+            flex: 1;
+            min-width: 120px;
+            text-align: center;
+        }
+        
+        .btn-approve {
+            background-color: var(--success);
+            color: white;
+        }
+        
+        .btn-reject {
+            background-color: var(--danger);
+            color: white;
+        }
+        
+        .btn-delete {
+            background-color: var(--secondary);
+            color: white;
+        }
+        
+        .btn-message {
+            background-color: var(--info);
+            color: white;
+        }
+        
+        .btn:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+        }
+        
+        .requests-list {
+            margin-top: 20px;
+        }
+        
+        .request-item {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .request-item:last-child {
+            border-bottom: none;
+        }
+        
+        .request-status {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .status-pending {
+            background-color: #f39c12;
+            color: white;
+        }
+        
+        .status-approved {
+            background-color: var(--success);
+            color: white;
+        }
+        
+        .status-rejected {
+            background-color: var(--danger);
+            color: white;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 500px;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .close-modal {
+            font-size: 24px;
+            cursor: pointer;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .form-group input, 
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        .form-group textarea {
+            min-height: 100px;
+        }
+        
+        @media (max-width: 600px) {
+            .info-item {
+                flex-direction: column;
+            }
+            
+            .info-label {
+                width: 100%;
+                margin-bottom: 5px;
+            }
+            
+            .actions {
+                flex-direction: column;
+            }
+            
+            .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Vynaa AI Authorization</h1>
+            <p>Panel kontrol untuk mengelola izin bot WhatsApp</p>
+        </header>
+        
+        <div class="card">
+            <h2>Permintaan Izin Baru</h2>
+            <div class="request-info">
+                <div class="info-item">
+                    <span class="info-label">Nama Bot:</span>
+                    <span class="info-value" id="bot-name">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Pemilik:</span>
+                    <span class="info-value" id="bot-owner">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Waktu:</span>
+                    <span class="info-value" id="request-time">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">IP Address:</span>
+                    <span class="info-value" id="request-ip">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Status:</span>
+                    <span class="info-value"><span class="request-status status-pending" id="request-status">MENUNGGU</span></span>
+                </div>
+            </div>
+            
+            <div class="actions">
+                <button class="btn btn-approve" id="btn-approve">Setujui</button>
+                <button class="btn btn-reject" id="btn-reject">Tolak</button>
+                <button class="btn btn-delete" id="btn-delete">Hapus</button>
+                <button class="btn btn-message" id="btn-message">Kirim Pesan</button>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Riwayat Permintaan</h2>
+            <div class="requests-list" id="requests-list">
+                <!-- Daftar permintaan akan dimuat di sini -->
+                <div class="request-item">
+                    <div>
+                        <strong>Vynaa AI</strong>
+                        <div>IP: 192.168.1.1</div>
+                        <small>2023-11-15 14:30:00</small>
+                    </div>
+                    <span class="request-status status-approved">DISETUJUI</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal untuk kirim pesan -->
+    <div class="modal" id="message-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Kirim Pesan ke Bot</h3>
+                <span class="close-modal">&times;</span>
+            </div>
+            <div class="form-group">
+                <label for="message-text">Isi Pesan:</label>
+                <textarea id="message-text" placeholder="Tulis pesan yang akan dikirim ke console bot..."></textarea>
+            </div>
+            <button class="btn btn-message" id="send-message">Kirim</button>
+        </div>
+    </div>
+    
+    <script src="verif.js"></script>
+</body>
+</html>
