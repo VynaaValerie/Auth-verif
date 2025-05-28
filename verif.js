@@ -12,7 +12,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const btnReject = document.getElementById('btn-reject');
     const btnDelete = document.getElementById('btn-delete');
     const btnMessage = document.getElementById('btn-message');
-    const requestsList = document.getElementById('requests-list');
     const pendingList = document.getElementById('pending-list');
     const approvedList = document.getElementById('approved-list');
     const rejectedList = document.getElementById('rejected-list');
@@ -20,9 +19,30 @@ document.addEventListener('DOMContentLoaded', function() {
     const closeModal = document.querySelector('.close-modal');
     const sendMessageBtn = document.getElementById('send-message');
     const messagesContainer = document.getElementById('messages-container');
+    const tabs = document.querySelectorAll('.tab');
+    const tabContents = document.querySelectorAll('.tab-content');
     
     let currentRequest = null;
     let allRequests = [];
+    
+    // Tab switching
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabName = tab.dataset.tab;
+            
+            // Update active tab
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            
+            // Show corresponding content
+            tabContents.forEach(content => {
+                content.classList.remove('active');
+                if (content.id === `${tabName}-list`) {
+                    content.classList.add('active');
+                }
+            });
+        });
+    });
     
     // Load initial data
     function loadInitialData(data) {
@@ -40,6 +60,7 @@ document.addEventListener('DOMContentLoaded', function() {
             currentRequest = allRequests.find(r => r.id === requestId);
             if (currentRequest) {
                 displayRequestDetails(currentRequest);
+                loadMessages(requestId);
             }
         }
         
@@ -48,10 +69,10 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Display request details
     function displayRequestDetails(request) {
-        botNameEl.textContent = request.botName;
-        botOwnerEl.textContent = request.owner;
-        requestTimeEl.textContent = new Date(request.time).toLocaleString();
-        requestIpEl.textContent = request.ip;
+        botNameEl.textContent = request.botName || '-';
+        botOwnerEl.textContent = request.owner || '-';
+        requestTimeEl.textContent = request.time ? new Date(request.time).toLocaleString() : '-';
+        requestIpEl.textContent = request.ip || '-';
         updateStatusUI(request.status);
         
         // Enable/disable buttons based on status
@@ -118,12 +139,12 @@ document.addEventListener('DOMContentLoaded', function() {
             
             requestItem.innerHTML = `
                 <div class="request-info">
-                    <strong>${request.botName}</strong>
+                    <strong>${request.botName || 'Unknown'}</strong>
                     <div class="request-meta">
-                        <span>Owner: ${request.owner}</span>
-                        <span>IP: ${request.ip}</span>
+                        <span>Owner: ${request.owner || 'Unknown'}</span>
+                        <span>IP: ${request.ip || 'Unknown'}</span>
                     </div>
-                    <small>${new Date(request.time).toLocaleString()}</small>
+                    <small>${request.time ? new Date(request.time).toLocaleString() : 'Unknown'}</small>
                 </div>
                 <span class="request-status ${statusClass}">${statusText}</span>
             `;
@@ -144,6 +165,10 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(data => {
                 const messages = data.messages.filter(m => m.requestId === requestId);
                 displayMessages(messages);
+            })
+            .catch(error => {
+                console.error('Error loading messages:', error);
+                messagesContainer.innerHTML = '<div class="empty-message">Error loading messages</div>';
             });
     }
     
@@ -156,13 +181,16 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
+        // Sort messages by time
+        messages.sort((a, b) => new Date(a.time) - new Date(b.time));
+        
         messages.forEach(message => {
             const messageEl = document.createElement('div');
             messageEl.className = `message ${message.admin ? 'admin-message' : 'bot-message'}`;
             
             messageEl.innerHTML = `
-                <div class="message-content">${message.message}</div>
-                <div class="message-time">${new Date(message.time).toLocaleTimeString()}</div>
+                <div class="message-content">${message.message || ''}</div>
+                <div class="message-time">${message.time ? new Date(message.time).toLocaleTimeString() : ''}</div>
             `;
             
             messagesContainer.appendChild(messageEl);
@@ -179,31 +207,42 @@ document.addEventListener('DOMContentLoaded', function() {
         if (currentRequest && currentRequest.id === request.id) {
             displayRequestDetails(request);
         }
-        // Show notification
-        showNotification(`New request from ${request.botName}`);
+        showNotification(`New request from ${request.botName || 'a bot'}`);
+        
+        // Highlight new request
+        const requestItem = document.querySelector(`.request-item[data-id="${request.id}"]`);
+        if (requestItem) {
+            requestItem.classList.add('new-request');
+            setTimeout(() => {
+                requestItem.classList.remove('new-request');
+            }, 5000);
+        }
     });
+    
     socket.on('request-approved', (request) => {
         allRequests = allRequests.map(r => r.id === request.id ? request : r);
         if (currentRequest && currentRequest.id === request.id) {
             displayRequestDetails(request);
         }
     });
+    
     socket.on('request-rejected', (request) => {
         allRequests = allRequests.map(r => r.id === request.id ? request : r);
         if (currentRequest && currentRequest.id === request.id) {
             displayRequestDetails(request);
         }
     });
+    
     socket.on('request-updated', updateRequestsLists);
+    
     socket.on('new-message', ({ requestId, message }) => {
         if (currentRequest && currentRequest.id === requestId) {
-            const messagesContainer = document.getElementById('messages-container');
             const messageEl = document.createElement('div');
             messageEl.className = `message ${message.admin ? 'admin-message' : 'bot-message'}`;
             
             messageEl.innerHTML = `
-                <div class="message-content">${message.message}</div>
-                <div class="message-time">${new Date(message.time).toLocaleTimeString()}</div>
+                <div class="message-content">${message.message || ''}</div>
+                <div class="message-time">${message.time ? new Date(message.time).toLocaleTimeString() : ''}</div>
             `;
             
             messagesContainer.appendChild(messageEl);
@@ -213,12 +252,20 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Show notification
     function showNotification(message) {
+        if (!('Notification' in window)) return;
+        
         if (Notification.permission === 'granted') {
-            new Notification('New Bot Request', { body: message });
+            new Notification('New Bot Request', { 
+                body: message,
+                icon: '/favicon.ico'
+            });
         } else if (Notification.permission !== 'denied') {
             Notification.requestPermission().then(permission => {
                 if (permission === 'granted') {
-                    new Notification('New Bot Request', { body: message });
+                    new Notification('New Bot Request', { 
+                        body: message,
+                        icon: '/favicon.ico'
+                    });
                 }
             });
         }
@@ -229,15 +276,25 @@ document.addEventListener('DOMContentLoaded', function() {
         if (currentRequest && confirm('Are you sure you want to approve this request?')) {
             fetch('/api/approve-request', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'x-auth-key': 'default-secret-key' // Replace with your actual auth key
+                },
                 body: JSON.stringify({ requestId: currentRequest.id })
-            }).then(res => res.json())
-              .then(data => {
-                  if (data.success) {
-                      currentRequest.status = 'approved';
-                      displayRequestDetails(currentRequest);
-                  }
-              });
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    currentRequest.status = 'approved';
+                    displayRequestDetails(currentRequest);
+                } else {
+                    alert('Failed to approve request: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error approving request:', error);
+                alert('Error approving request');
+            });
         }
     });
     
@@ -245,15 +302,25 @@ document.addEventListener('DOMContentLoaded', function() {
         if (currentRequest && confirm('Are you sure you want to reject this request?')) {
             fetch('/api/reject-request', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'x-auth-key': 'default-secret-key' // Replace with your actual auth key
+                },
                 body: JSON.stringify({ requestId: currentRequest.id })
-            }).then(res => res.json())
-              .then(data => {
-                  if (data.success) {
-                      currentRequest.status = 'rejected';
-                      displayRequestDetails(currentRequest);
-                  }
-              });
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    currentRequest.status = 'rejected';
+                    displayRequestDetails(currentRequest);
+                } else {
+                    alert('Failed to reject request: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error rejecting request:', error);
+                alert('Error rejecting request');
+            });
         }
     });
     
@@ -268,6 +335,7 @@ document.addEventListener('DOMContentLoaded', function() {
     btnMessage.addEventListener('click', function() {
         if (currentRequest) {
             messageModal.style.display = 'flex';
+            document.getElementById('message-text').focus();
         }
     });
     
@@ -285,24 +353,59 @@ document.addEventListener('DOMContentLoaded', function() {
         if (currentRequest) {
             fetch('/api/send-message', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'x-auth-key': 'default-secret-key' // Replace with your actual auth key
+                },
                 body: JSON.stringify({
                     requestId: currentRequest.id,
                     message: messageText
                 })
-            }).then(res => res.json())
-              .then(data => {
-                  if (data.success) {
-                      document.getElementById('message-text').value = '';
-                      messageModal.style.display = 'none';
-                  }
-              });
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('message-text').value = '';
+                    messageModal.style.display = 'none';
+                    
+                    // Add message to UI immediately
+                    const newMessage = {
+                        id: Date.now().toString(),
+                        requestId: currentRequest.id,
+                        message: messageText,
+                        time: new Date().toISOString(),
+                        admin: true
+                    };
+                    
+                    const messageEl = document.createElement('div');
+                    messageEl.className = 'message admin-message';
+                    messageEl.innerHTML = `
+                        <div class="message-content">${messageText}</div>
+                        <div class="message-time">Just now</div>
+                    `;
+                    
+                    messagesContainer.appendChild(messageEl);
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                } else {
+                    alert('Failed to send message: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error sending message:', error);
+                alert('Error sending message');
+            });
         }
     });
     
-    // Close modal when clicking outside
+    // Close modal when clicking outside or pressing Escape
     window.addEventListener('click', function(event) {
         if (event.target === messageModal) {
+            messageModal.style.display = 'none';
+        }
+    });
+    
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape' && messageModal.style.display === 'flex') {
             messageModal.style.display = 'none';
         }
     });
@@ -314,8 +417,8 @@ document.addEventListener('DOMContentLoaded', function() {
         loadMessages(requestId);
     }
     
-    // Request notification permission
-    if (window.Notification) {
+    // Request notification permission on page load
+    if ('Notification' in window) {
         Notification.requestPermission();
     }
 });

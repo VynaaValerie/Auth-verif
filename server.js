@@ -22,17 +22,20 @@ const io = new Server(server, {
 
 const port = process.env.PORT || 3000;
 
-// Database setup - Using Memory adapter for Vercel compatibility
+// Database setup
 const adapter = new Memory();
 const db = new Low(adapter);
 
-// Initialize database with default data
+// Initialize database
 async function initializeDB() {
   db.data = {
     requests: [],
     approved: [],
     rejected: [],
-    messages: []
+    messages: [],
+    settings: {
+      authKey: process.env.AUTH_KEY || 'default-secret-key'
+    }
   };
   await db.write();
 }
@@ -47,21 +50,36 @@ app.use(express.static(path.join(__dirname, 'public'), {
   extensions: ['html']
 }));
 
+// Authentication middleware
+const authenticate = (req, res, next) => {
+  const authKey = req.headers['x-auth-key'];
+  if (authKey && authKey === db.data.settings.authKey) {
+    return next();
+  }
+  res.status(401).json({ success: false, message: 'Unauthorized' });
+};
+
 // Socket.io connection
 io.on('connection', (socket) => {
-  console.log('New client connected:', socket.id);
+  console.log('New admin client connected:', socket.id);
   
   // Send current data to new client
   socket.emit('initial-data', db.data);
   
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+    console.log('Admin client disconnected:', socket.id);
   });
 });
 
 // API Endpoints
 app.post('/api/request-permission', async (req, res) => {
-  const { botName, owner } = req.body;
+  const { botName, owner, authKey } = req.body;
+  
+  // Verify auth key
+  if (authKey !== db.data.settings.authKey) {
+    return res.status(401).json({ success: false, message: 'Invalid auth key' });
+  }
+
   const clientIp = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   
   const requestId = uuidv4();
@@ -88,7 +106,7 @@ app.post('/api/request-permission', async (req, res) => {
   });
 });
 
-app.post('/api/approve-request', async (req, res) => {
+app.post('/api/approve-request', authenticate, async (req, res) => {
   const { requestId } = req.body;
   
   const request = db.data.requests.find(r => r.id === requestId);
@@ -114,7 +132,7 @@ app.post('/api/approve-request', async (req, res) => {
   });
 });
 
-app.post('/api/reject-request', async (req, res) => {
+app.post('/api/reject-request', authenticate, async (req, res) => {
   const { requestId } = req.body;
   
   const request = db.data.requests.find(r => r.id === requestId);
@@ -140,7 +158,7 @@ app.post('/api/reject-request', async (req, res) => {
   });
 });
 
-app.post('/api/send-message', async (req, res) => {
+app.post('/api/send-message', authenticate, async (req, res) => {
   const { requestId, message } = req.body;
   
   const request = [...db.data.requests, ...db.data.approved, ...db.data.rejected].find(r => r.id === requestId);
@@ -169,8 +187,13 @@ app.post('/api/send-message', async (req, res) => {
 });
 
 app.get('/api/verify-permission', async (req, res) => {
-  const { ip } = req.query;
+  const { ip, authKey } = req.query;
   
+  // Verify auth key
+  if (authKey !== db.data.settings.authKey) {
+    return res.status(401).json({ valid: false, message: 'Invalid auth key' });
+  }
+
   const isApproved = db.data.approved.some(request => request.ip === ip);
   
   res.json({
@@ -179,20 +202,25 @@ app.get('/api/verify-permission', async (req, res) => {
   });
 });
 
-app.get('/api/get-requests', async (req, res) => {
+app.get('/api/get-requests', authenticate, async (req, res) => {
   res.json(db.data);
 });
 
-// Serve admin panel
+// Admin panel routes
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
-// Handle all other routes
-app.get('*', (req, res) => {
+app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Handle 404
+app.use((req, res) => {
+  res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
+});
+
 server.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(`Authorization server running on port ${port}`);
+  console.log(`Admin panel: http://localhost:${port}/admin`);
 });

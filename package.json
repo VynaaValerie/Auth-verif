@@ -1,6 +1,6 @@
 {
   "name": "rylac-ai-auth",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Authorization Panel for Vynaa AI",
   "main": "server.js",
   "type": "module",
@@ -15,9 +15,16 @@
     "socket.io": "^4.7.2",
     "lowdb": "^5.0.5",
     "cors": "^2.8.5",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "@adiwajshing/baileys": "^6.5.0",
+    "axios": "^1.6.2",
+    "chalk": "^5.3.0",
+    "moment-timezone": "^0.5.43",
+    "qrcode-terminal": "^0.12.0",
+    "node-cache": "^5.1.2",
+    "pino": "^8.16.0"
   },
   "engines": {
-    "node": ">=14.x"
+    "node": ">=18.x"
   }
 }
