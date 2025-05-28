@@ -1,8 +1,7 @@
 import express from 'express';
-import path from 'path';
 import { fileURLToPath } from 'url';
-import { Low } from 'lowdb';
-import { JSONFile } from 'lowdb/node';
+import path from 'path';
+import { Low, Memory } from 'lowdb';
 import { v4 as uuidv4 } from 'uuid';
 import cors from 'cors';
 import { Server } from 'socket.io';
@@ -23,15 +22,18 @@ const io = new Server(server, {
 
 const port = process.env.PORT || 3000;
 
-// Database setup
-const file = path.join(__dirname, 'db.json');
-const adapter = new JSONFile(file);
+// Database setup - Using Memory adapter for Vercel compatibility
+const adapter = new Memory();
 const db = new Low(adapter);
 
-// Initialize database
+// Initialize database with default data
 async function initializeDB() {
-  await db.read();
-  db.data ||= { requests: [], approved: [], rejected: [], messages: [] };
+  db.data = {
+    requests: [],
+    approved: [],
+    rejected: [],
+    messages: []
+  };
   await db.write();
 }
 
